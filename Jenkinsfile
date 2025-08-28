@@ -115,12 +115,6 @@ pipeline {
     }
 
     stage('Deploy to ECS') {
-      when {
-        anyOf {
-          branch 'main'
-          branch 'master'
-        }
-      }
       steps {
         withCredentials([[
           $class: 'AmazonWebServicesCredentialsBinding',
