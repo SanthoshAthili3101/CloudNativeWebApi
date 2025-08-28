@@ -107,37 +107,37 @@ pipeline {
               set -e
               CLUSTER_NAME="cloudnativewebapi-cluster"
               SERVICE_NAME="cloudnativewebapi-service"
-              TASK_FAMILY="cloudnativewebapi-task"   # TODO: set to Terraform task definition family
+              TASK_FAMILY="cloudnativewebapi-task"   # must match Terraform
 
-              # 1) Get latest ACTIVE task definition for the family (not from service)
+              # Get latest ACTIVE task def JSON for the family
               BASE_TD=$(aws ecs describe-task-definition \
                 --task-definition "$TASK_FAMILY" \
                 --region "${AWS_REGION}" \
                 --query 'taskDefinition' \
-                --output json)  # latest ACTIVE by family [web:244]
+                --output json)
 
-              # 2) Update image and strip read-only fields before re-registering
+              # Update image and strip read-only fields
               echo "$BASE_TD" | jq \
                 --arg IMG "${DOCKER_IMAGE}" '
                   .containerDefinitions |= map(.image = $IMG)
                   | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
-                ' > task-updated.json  # required cleanup [web:248][web:251][web:246]
+                ' > task-updated.json
 
-              # 3) Register new revision
+              # Register new revision
               NEW_TD_ARN=$(aws ecs register-task-definition \
                 --cli-input-json file://task-updated.json \
                 --region "${AWS_REGION}" \
                 --query 'taskDefinition.taskDefinitionArn' \
-                --output text)  # new revision ARN [web:246]
+                --output text)
 
-              # 4) Update the existing service to use the new revision
+              # Update service to new revision
               aws ecs update-service \
                 --cluster "$CLUSTER_NAME" \
                 --service "$SERVICE_NAME" \
                 --task-definition "$NEW_TD_ARN" \
-                --region "${AWS_REGION}"  # rolling deploy [web:256]
+                --region "${AWS_REGION}"
 
-              echo "Deployed task definition: $NEW_TD_ARN"
+              echo "Deployed task: $NEW_TD_ARN"
             '''
           }
         }
