@@ -83,7 +83,7 @@ pipeline {
       }
     }
 
-    stage('ECR Login') {
+    stage('ECR Login and Push') {
       steps {
         withCredentials([[
           $class: 'AmazonWebServicesCredentialsBinding',
@@ -93,25 +93,23 @@ pipeline {
             sh '''
               set -e
               aws --version
+              # Login
               aws ecr get-login-password --region "${AWS_REGION}" \
                 | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
+
+              # Ensure repo exists (idempotent)
+              aws ecr describe-repositories \
+                --repository-names "${ECR_REPO_NAME}" \
+                --region "${AWS_REGION}" \
+              || aws ecr create-repository \
+                   --repository-name "${ECR_REPO_NAME}" \
+                   --region "${AWS_REGION}"
+
+              # Push images
+              docker push "${DOCKER_IMAGE}"
+              docker push "${DOCKER_IMAGE_LATEST}"
             '''
           }
-        }
-      }
-    }
-
-    stage('Push to ECR') {
-      steps {
-        ansiColor('xterm') {
-          sh '''
-            set -e
-            # Create repo if it doesn’t exist
-            aws ecr describe-repositories --repository-names "${ECR_REPO_NAME}" --region "${AWS_REGION}" \
-              || aws ecr create-repository --repository-name "${ECR_REPO_NAME}" --region "${AWS_REGION}"
-            docker push "${DOCKER_IMAGE}"
-            docker push "${DOCKER_IMAGE_LATEST}"
-          '''
         }
       }
     }
@@ -124,43 +122,48 @@ pipeline {
         }
       }
       steps {
-        ansiColor('xterm') {
-          sh '''
-            set -e
-            CLUSTER_NAME="cloudnativewebapi-cluster"
-            SERVICE_NAME="cloudnativewebapi-service"
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-creds'
+        ]]) {
+          ansiColor('xterm') {
+            sh '''
+              set -e
+              CLUSTER_NAME="cloudnativewebapi-cluster"
+              SERVICE_NAME="cloudnativewebapi-service"
 
-            # Fetch current task definition
-            TD_ARN=$(aws ecs describe-services \
-              --cluster "$CLUSTER_NAME" \
-              --services "$SERVICE_NAME" \
-              --region "${AWS_REGION}" \
-              --query 'services[0].taskDefinition' --output text)
+              # Fetch current task definition
+              TD_ARN=$(aws ecs describe-services \
+                --cluster "$CLUSTER_NAME" \
+                --services "$SERVICE_NAME" \
+                --region "${AWS_REGION}" \
+                --query 'services[0].taskDefinition' --output text)
 
-            # Get task JSON
-            aws ecs describe-task-definition \
-              --task-definition "$TD_ARN" \
-              --region "${AWS_REGION}" \
-              --query 'taskDefinition' > task.json
+              # Get task JSON
+              aws ecs describe-task-definition \
+                --task-definition "$TD_ARN" \
+                --region "${AWS_REGION}" \
+                --query 'taskDefinition' > task.json
 
-            # Update image in container definitions to new ECR tag
-            jq '.containerDefinitions |= map(if .image then .image = env.DOCKER_IMAGE else . end)' task.json > task-updated.json
+              # Update image in container definitions to new ECR tag
+              jq '.containerDefinitions |= map(if .image then .image = env.DOCKER_IMAGE else . end)' task.json > task-updated.json
 
-            # Register new task definition revision
-            NEW_TD_ARN=$(aws ecs register-task-definition \
-              --cli-input-json file://task-updated.json \
-              --region "${AWS_REGION}" \
-              --query 'taskDefinition.taskDefinitionArn' --output text)
+              # Register new task definition revision
+              NEW_TD_ARN=$(aws ecs register-task-definition \
+                --cli-input-json file://task-updated.json \
+                --region "${AWS_REGION}" \
+                --query 'taskDefinition.taskDefinitionArn' --output text)
 
-            # Update service to use new task definition
-            aws ecs update-service \
-              --cluster "$CLUSTER_NAME" \
-              --service "$SERVICE_NAME" \
-              --task-definition "$NEW_TD_ARN" \
-              --region "${AWS_REGION}"
+              # Update service to use new task definition
+              aws ecs update-service \
+                --cluster "$CLUSTER_NAME" \
+                --service "$SERVICE_NAME" \
+                --task-definition "$NEW_TD_ARN" \
+                --region "${AWS_REGION}"
 
-            echo "Deployed task: $NEW_TD_ARN"
-          '''
+              echo "Deployed task: $NEW_TD_ARN"
+            '''
+          }
         }
       }
     }
