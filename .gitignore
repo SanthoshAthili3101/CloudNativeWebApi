@@ -1,0 +1,101 @@
+﻿# .NET build outputs
+bin/
+obj/
+[Bb]uild/
+[Ll]og/
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+*.user
+*.suo
+*.svclog
+*.pidb
+*.sln.docstates
+
+# NuGet
+*.nupkg
+packages/
+.nuget/
+project.lock.json
+artifacts/
+.nuget.props
+.nuget.targets
+
+# Rider / VS / VS Code
+.vs/
+.idea/
+*.iml
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+[Bb]in/
+[Oo]bj/
+.vs/
+
+bin/
+obj/
+TestResults/
+obj
+TestResults/
+*.user
+*.suo
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and temp
+*.log
+logs/
+*.tmp
+temp/
+.tmp/
+
+# Docker
+docker-compose.override.yml
+docker-compose.*.yml
+.docker/
+.dockerignore.local
+
+# Jenkins
+jenkins_home/
+secrets/
+init.groovy.d/
+.work/
+.last_failed
+
+# Node (if frontend present)
+node_modules/
+npm-debug.log*
+yarn-error.log
+pnpm-lock.yaml
+
+# Python (if scripts present)
+__pycache__/
+*.pyc
+
+# Terraform (keep tf files, ignore local state and overrides)
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+crash.log
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Secrets (never commit)
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.pfx
+id_rsa
+id_ed25519
+*.kube/config
