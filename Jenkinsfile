@@ -19,9 +19,7 @@ pipeline {
   stages {
 
     stage('Checkout') {
-      steps {
-        checkout scm
-      }
+      steps { checkout scm }
     }
 
     stage('Setup .NET SDK') {
@@ -49,7 +47,6 @@ pipeline {
         ansiColor('xterm') {
           sh '''
             set -e
-            # Discover and run tests
             for proj in $(find . -name "*Tests.csproj"); do
               echo "Running tests in $proj"
               dotnet test "$proj" --configuration Release --no-build --logger "trx;LogFileName=test_results.trx"
@@ -85,27 +82,15 @@ pipeline {
 
     stage('ECR Login and Push') {
       steps {
-        withCredentials([[
-          $class: 'AmazonWebServicesCredentialsBinding',
-          credentialsId: 'aws-creds'
-        ]]) {
+        withCredentials([[ $class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-creds' ]]) {
           ansiColor('xterm') {
             sh '''
               set -e
               aws --version
-              # Login
               aws ecr get-login-password --region "${AWS_REGION}" \
                 | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
-
-              # Ensure repo exists (idempotent)
-              aws ecr describe-repositories \
-                --repository-names "${ECR_REPO_NAME}" \
-                --region "${AWS_REGION}" \
-              || aws ecr create-repository \
-                   --repository-name "${ECR_REPO_NAME}" \
-                   --region "${AWS_REGION}"
-
-              # Push images
+              aws ecr describe-repositories --repository-names "${ECR_REPO_NAME}" --region "${AWS_REGION}" \
+              || aws ecr create-repository --repository-name "${ECR_REPO_NAME}" --region "${AWS_REGION}"
               docker push "${DOCKER_IMAGE}"
               docker push "${DOCKER_IMAGE_LATEST}"
             '''
@@ -116,46 +101,43 @@ pipeline {
 
     stage('Deploy to ECS') {
       steps {
-        withCredentials([[
-          $class: 'AmazonWebServicesCredentialsBinding',
-          credentialsId: 'aws-creds'
-        ]]) {
+        withCredentials([[ $class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-creds' ]]) {
           ansiColor('xterm') {
             sh '''
               set -e
               CLUSTER_NAME="cloudnativewebapi-cluster"
               SERVICE_NAME="cloudnativewebapi-service"
+              TASK_FAMILY="cloudnativewebapi-task"   # TODO: set to Terraform task definition family
 
-              # Fetch current task definition
-              TD_ARN=$(aws ecs describe-services \
-                --cluster "$CLUSTER_NAME" \
-                --services "$SERVICE_NAME" \
+              # 1) Get latest ACTIVE task definition for the family (not from service)
+              BASE_TD=$(aws ecs describe-task-definition \
+                --task-definition "$TASK_FAMILY" \
                 --region "${AWS_REGION}" \
-                --query 'services[0].taskDefinition' --output text)
+                --query 'taskDefinition' \
+                --output json)  # latest ACTIVE by family [web:244]
 
-              # Get task JSON
-              aws ecs describe-task-definition \
-                --task-definition "$TD_ARN" \
-                --region "${AWS_REGION}" \
-                --query 'taskDefinition' > task.json
+              # 2) Update image and strip read-only fields before re-registering
+              echo "$BASE_TD" | jq \
+                --arg IMG "${DOCKER_IMAGE}" '
+                  .containerDefinitions |= map(.image = $IMG)
+                  | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
+                ' > task-updated.json  # required cleanup [web:248][web:251][web:246]
 
-              # Update image in container definitions to new ECR tag
-              jq '.containerDefinitions |= map(if .image then .image = env.DOCKER_IMAGE else . end)' task.json > task-updated.json
-
-              # Register new task definition revision
+              # 3) Register new revision
               NEW_TD_ARN=$(aws ecs register-task-definition \
                 --cli-input-json file://task-updated.json \
                 --region "${AWS_REGION}" \
-                --query 'taskDefinition.taskDefinitionArn' --output text)
+                --query 'taskDefinition.taskDefinitionArn' \
+                --output text)  # new revision ARN [web:246]
 
-              # Update service to use new task definition
+              # 4) Update the existing service to use the new revision
               aws ecs update-service \
                 --cluster "$CLUSTER_NAME" \
                 --service "$SERVICE_NAME" \
                 --task-definition "$NEW_TD_ARN" \
-                --region "${AWS_REGION}"
+                --region "${AWS_REGION}"  # rolling deploy [web:256]
 
-              echo "Deployed task: $NEW_TD_ARN"
+              echo "Deployed task definition: $NEW_TD_ARN"
             '''
           }
         }
