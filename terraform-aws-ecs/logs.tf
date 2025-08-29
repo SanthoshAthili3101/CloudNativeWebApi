@@ -1,0 +1,6 @@
+﻿
+# CloudWatch Logs group for the task (new)
+resource "aws_cloudwatch_log_group" "ecs" {
+  name              = "/ecs/${var.app_name}"
+  retention_in_days = 14
+}
