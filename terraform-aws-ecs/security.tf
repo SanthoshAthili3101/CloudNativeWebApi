@@ -1,4 +1,5 @@
 ﻿# Security Group (already present)
+
 resource "aws_security_group" "ecs_sg" {
   name        = "${var.app_name}-sg"
   description = "Allow inbound HTTP traffic"
@@ -17,6 +18,7 @@ resource "aws_security_group" "ecs_sg" {
     to_port     = 8080
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"] 
+    }
 
   egress {
     description = "Allow all outbound traffic"
